@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  auth_service:
+    build: ./auth_service
+    container_name: auth_service
+    ports:
+      - "8000:8000"
+
+  diary_service:
+    build: ./diary_service
+    container_name: diary_service
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./volumes/diary_service_data:/data
+
+  analysis_service:
+    build: ./analysis_service
+    container_name: analysis_service
+    ports:
+      - "8002:8002"
+  advice_service:
+    build: ./advice_service
+    container_name: advice_service
+    ports:
+      - "8003:8003"

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+  <meta charset="UTF-8" />
+  <title>MindCare - Dnevnik emocija</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; background: #f4f4f4; }
+    h1, h2 { color: #2c3e50; }
+    input, textarea, button { width: 100%; margin: 5px 0; padding: 8px; font-size: 16px; }
+    button { background: #2ecc71; color: white; border: none; cursor: pointer; }
+    table { width: 100%; margin-top: 20px; border-collapse: collapse; background: white; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+    th { background: #ecf0f1; }
+    canvas { margin-top: 30px; background: white; padding: 10px; border-radius: 8px; }
+
+    .emotion-sreća     { background-color: #d4edda; }
+    .emotion-tuga      { background-color: #f8d7da; }
+    .emotion-ljutnja   { background-color: #fdd; }
+    .emotion-strah     { background-color: #fff3cd; }
+    .emotion-neutralno { background-color: #e2e3e5; }
+  </style>
+</head>
+<body>
+
+  <h1>MindCare - Dnevnik emocija</h1>
+
+  <input type="text" id="username" placeholder="Korisničko ime" required />
+  <textarea id="note1" placeholder="Kako se osjećaš (unos 1)?"></textarea>
+  <textarea id="note2" placeholder="Kako se osjećaš (unos 2)?"></textarea>
+  <textarea id="note3" placeholder="Kako se osjećaš (unos 3)?"></textarea>
+ 
+  <button type="button" onclick="submitBulk()">Spremi unose</button>
+  <button type="button" onclick="fetchEntries()">Prikaži unose korisnika</button>
+
+  <!-- Inicijalno skriveno -->
+  <p id="adviceBox" style="margin-top:10px; font-style: italic; color: #2c3e50; display: none;"></p>
+
+  <h2>Unosi</h2>
+  <table id="entryTable" style="display:none;">
+    <thead>
+      <tr>
+        <th>Bilješka</th>
+        <th>Emocija</th>
+        <th>Vrijeme</th>
+      </tr>
+    </thead>
+    <tbody id="entriesBody"></tbody>
+  </table>
+
+  <h2>Graf emocija</h2>
+  <canvas id="emotionChart" width="600" height="200"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    let chart;
+
+    async function submitBulk() {
+      console.log("▶ Pozvana funkcija submitBulk()");
+      const username = document.getElementById("username").value.trim();
+      if (!username) return alert("Upiši korisničko ime.");
+
+      const notes = [1,2,3]
+        .map(i => document.getElementById(`note${i}`).value.trim())
+        .filter(n => n!=="")
+        .map(n => ({ username, note: n }));
+
+      if (notes.length===0) return alert("Unesi barem jednu bilješku.");
+
+      try {
+        const response = await fetch("http://localhost:8001/bulk-entry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entries: notes })
+        });
+        const result = await response.json();
+        console.log("📦 Primljeni rezultat s /bulk-entry:", result);
+
+        if (result.results && result.results.length>0) {
+          const lastEmotion = result.results.slice(-1)[0].emotion;
+          console.log("🧠 Zadnja emocija:", lastEmotion);
+
+          try {
+            const adviceRes = await fetch(`http://localhost:8003/advice/${lastEmotion}`);
+            if (!adviceRes.ok) throw new Error("Neuspješan dohvat savjeta");
+            const adviceData = await adviceRes.json();
+
+            const adviceBox = document.getElementById("adviceBox");
+            adviceBox.innerText = 
+              `📝 Savjet za tvoje trenutno stanje (${lastEmotion}): ${adviceData.advice}`;
+            adviceBox.style.display = "block"; // pokaži savjet
+          } catch (e) {
+            console.error("❌ Greška pri dohvaćanju savjeta:", e);
+          }
+        }
+
+        loadEntries(username);
+      } catch (err) {
+        console.error("❌ Greška kod slanja bulk unosa:", err);
+        const adviceBox = document.getElementById("adviceBox");
+        adviceBox.innerText = "Greška kod dobivanja savjeta.";
+        adviceBox.style.display = "block";
+      }
+    }
+
+    function fetchEntries() {
+      const username = document.getElementById("username").value.trim();
+      if (!username) return alert("Upiši korisničko ime.");
+      loadEntries(username);
+    }
+
+    async function loadEntries(username) {
+      const res = await fetch(`http://localhost:8001/entries/${username}`);
+      const data = await res.json();
+
+      const table = document.getElementById("entryTable");
+      const tbody = document.getElementById("entriesBody");
+      tbody.innerHTML = "";
+
+      if (data.length === 0) {
+        table.style.display = "none";
+        if (chart) chart.destroy();
+        // **ne skrivamo više** adviceBox
+        return;
+      }
+
+      table.style.display = "table";
+      data.reverse().forEach(entry => {
+        const emotionClass = `emotion-${entry.emotion}`;
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${entry.note}</td>
+          <td class="${emotionClass}">${entry.emotion}</td>
+          <td>${new Date(entry.timestamp).toLocaleString()}</td>
+        `;
+        tbody.appendChild(row);
+      });
+
+      // crtanje grafa
+      const labels = data.map(e=>new Date(e.timestamp).toLocaleString());
+      const emotions = data.map(e=>e.emotion);
+      const emotionMap = { "strah": -1, "ljutnja": 0, "tuga": 1, "neutralno": 2, "sreća": 3 };
+      const values = emotions.map(e=>emotionMap[e] ?? 2);
+
+      if (chart) chart.destroy();
+      const ctx = document.getElementById("emotionChart").getContext("2d");
+      chart = new Chart(ctx, {
+        type: "line",
+        data: { labels, datasets: [{ label:"Emocija", data:values, borderColor:"#3498db", backgroundColor:"rgba(52,152,219,0.2)", fill:true, tension:0.3 }] },
+        options: {
+          scales: {
+            y: {
+              min:-1, max:3, ticks:{
+                stepSize:1,
+                callback: v => Object.keys(emotionMap).find(k=>emotionMap[k]===v)||"?"
+              }
+            }
+          }
+        }
+      });
+    }
+  </script>
+
+</body>
+</html>
