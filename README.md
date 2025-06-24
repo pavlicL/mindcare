@@ -1,0 +1,2 @@
+# mindcare
+Distributed systems project
